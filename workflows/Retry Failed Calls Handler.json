@@ -1,0 +1,274 @@
+{
+  "name": "Retry Failed Calls Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "84930a31-bf77-44e6-8f93-19a6614f3759",
+      "name": "Every Hour1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        496,
+        224
+      ],
+      "notes": "Runs hourly to check for calls that need retry"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ofrckoqruccqwedymylo.supabase.co/rest/v1/rpc/get_failed_contacts_for_retry",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {}
+      },
+      "id": "4e56c4aa-95e5-4dd2-a83d-fe59441f3566",
+      "name": "Fetch Failed Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        704,
+        224
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "iSyNqOO059Lycrrk",
+          "name": "Supabase account"
+        }
+      },
+      "notes": "Gets contacts with status callback/busy and respects backoff timing"
+    },
+    {
+      "parameters": {
+        "jsCode": " const contacts = $input.all()[0].json;\n\n  if (!Array.isArray(contacts) || contacts.length === 0) {\n    return [];\n  }\n\n  // Filter contacts based on retry timing\n  const now = Date.now();\n  const retryContacts = [];\n\n  for (const contact of contacts) {\n    const lastAttempt = contact.last_attempt_at ? new Date(contact.last_attempt_at).getTime() : 0;\n    const timeSinceLastAttempt = now - lastAttempt;\n    const hoursElapsed = timeSinceLastAttempt / (1000 * 60 * 60);\n\n    // Backoff strategy based on attempts\n    let requiredHours;\n    switch(contact.attempts) {\n      case 1:\n        requiredHours = 1; // 1 hour for first retry\n        break;\n      case 2:\n        requiredHours = 4; // 4 hours for second retry\n        break;\n      case 3:\n        requiredHours = 24; // 24 hours for third retry\n        break;\n      default:\n        requiredHours = 72; // 3 days for further retries\n    }\n\n    if (hoursElapsed >= requiredHours && contact.attempts < 3) {\n      retryContacts.push(contact);\n    }\n  }\n\n  return retryContacts;"
+      },
+      "id": "46e666e7-0677-441d-9c2c-4b153c5e0144",
+      "name": "Apply Backoff Strategy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        896,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "93d708e2-1277-4c65-a829-6db8d650028c",
+      "name": "Process One at a Time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://ofrckoqruccqwedymylo.supabase.co/rest/v1/contacts_to_call?id=eq.{{ $json.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"status\": \"queued_retry\", \"last_attempt_at\": \"{{ new Date().toISOString() }}\"}",
+        "options": {}
+      },
+      "id": "bb663833-139f-40f5-b293-7d7519afb16c",
+      "name": "Update Status to Retry",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1296,
+        224
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "iSyNqOO059Lycrrk",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://atoms-api.smallest.ai/api/v1/conversation/outbound",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"agentId\": \"68d55989ae02784f846adb2a\", \"phoneNumber\": \"{{ $json.phone }}\", \"variables\": {\"contact_name\": \"{{ $json.name }}\", \"contact_id\": \"{{ $json.id }}\"}, \"webhookUrl\": \"https://prathamsingla4619.app.n8n.cloud/webhook/call-complete\"}",
+        "options": {}
+      },
+      "id": "863405ac-821a-4353-83b5-eb5fe7744b0e",
+      "name": "Retry Call via Atoms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1504,
+        224
+      ],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "mJNogihKN8Dgcqik",
+          "name": "Custom Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://ofrckoqruccqwedymylo.supabase.co/rest/v1/contacts_to_call?id=eq.{{ $json.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"status\": \"calling\", \"attempts\": {{ ($json.attempts || 0) + 1 }}}",
+        "options": {}
+      },
+      "id": "f8cb5ca5-6f9e-49aa-a473-195fa2e945d8",
+      "name": "Increment Attempts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1696,
+        224
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "iSyNqOO059Lycrrk",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every Hour1": {
+      "main": [
+        [
+          {
+            "node": "Fetch Failed Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Failed Contacts": {
+      "main": [
+        [
+          {
+            "node": "Apply Backoff Strategy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Backoff Strategy": {
+      "main": [
+        [
+          {
+            "node": "Process One at a Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process One at a Time": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Status to Retry": {
+      "main": [
+        [
+          {
+            "node": "Retry Call via Atoms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Call via Atoms": {
+      "main": [
+        [
+          {
+            "node": "Increment Attempts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Increment Attempts": {
+      "main": [
+        [
+          {
+            "node": "Process One at a Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0add49c5-6cf0-4a30-8d6e-d45f0cae9577",
+  "meta": {
+    "instanceId": "2dde426c3a8ddb9bde60c89d13d02c8762ffee65170be84edae10a8ddd2a898c"
+  },
+  "id": "72p5CxkPsqUeIF8c",
+  "tags": []
+}

@@ -1,0 +1,247 @@
+{
+  "name": "Voice Agent Webhook Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "call-complete",
+        "options": {}
+      },
+      "id": "5ab41fe5-8914-4096-af49-dd5d528511a7",
+      "name": "Webhook1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        912,
+        544
+      ],
+      "webhookId": "call-complete"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://ofrckoqruccqwedymylo.supabase.co/rest/v1/contacts_to_call",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $json.contact_id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"{{ $json.final_status }}\",\n  \"company_name\": \"{{ $json.company_name }}\",\n  \"job_role\": \"{{ $json.job_role }}\",\n  \"contact_verified\": \"{{ $json.contact_verified }}\"\n}",
+        "options": {}
+      },
+      "id": "d3f50d91-b1e5-462a-86ad-fde8e227f367",
+      "name": "Update Contact Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1312,
+        544
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "iSyNqOO059Lycrrk",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const callResult = $input.all()[0].json;\n\n// Log the received data for debugging\nconsole.log('Received webhook data:', JSON.stringify(callResult, null, 2));\n\n// Determine final status based on disposition\nlet finalStatus = 'completed';\nif (['callback', 'busy', 'no_answer'].includes(callResult.disposition)) {\n  finalStatus = 'callback';\n} else if (callResult.disposition === 'wrong_number') {\n  finalStatus = 'failed';\n} else if (callResult.disposition === 'no_interest') {\n  finalStatus = 'completed'; // or 'no_interest' if you want a separate status\n}\n\n// Extract data for processing - handle the new data structure\nconst processedData = {\n  call_id: callResult.call_id || `call_${Date.now()}`,\n  contact_id: callResult.contact_id,\n  contact_name: callResult.contact_name || 'Unknown',\n  phone: callResult.phone,\n  disposition: callResult.disposition || 'unknown',\n  summary: callResult.call_summary || '',\n  duration_sec: parseInt(callResult.call_duration_seconds) || 0,\n  final_status: finalStatus,\n  company_name: callResult.company_name || '',\n  job_role: callResult.job_role || '',\n  contact_verified: callResult.contact_verified || 'unknown',\n  transcript: callResult.transcript || '',\n  recording_url: callResult.recording_url || '',\n  atoms_metadata: JSON.stringify(callResult),\n  timestamp: new Date().toISOString()\n};\n\nreturn [processedData];"
+      },
+      "id": "c3c4e663-5bfd-45a3-9975-7f3c8988fcac",
+      "name": "Process Call Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ofrckoqruccqwedymylo.supabase.co/rest/v1/call_logs",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"call_id\": \"{{ $json.call_id }}\",\n  \"contact_id\": \"{{ $json.contact_id }}\",\n  \"name\": \"{{ $json.contact_name }}\",\n  \"phone\": \"{{ $json.phone }}\",\n  \"disposition\": \"{{ $json.disposition }}\",\n  \"summary\": \"{{ $json.summary }}\",\n  \"duration_sec\": {{ $json.duration_sec }},\n  \"company_name\": \"{{ $json.company_name }}\",\n  \"job_role\": \"{{ $json.job_role }}\",\n  \"contact_verified\": \"{{ $json.contact_verified }}\",\n  \"transcript\": \"{{ $json.transcript }}\",\n  \"recording_url\": \"{{ $json.recording_url }}\",\n  \"atoms_call_data\": {{ $json.atoms_metadata }}\n}",
+        "options": {}
+      },
+      "id": "972b14d8-6487-49db-a13d-fd185474a02d",
+      "name": "Insert Call Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1536,
+        544
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "iSyNqOO059Lycrrk",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/1eviYHYU8t0Qp7GytlDtbewzxR2-2iwCRDsqsCB7wZCI/edit?gid=0#gid=0",
+          "__regex": "https:\\/\\/(?:drive|docs)\\.google\\.com(?:\\/.*|)\\/d\\/([0-9a-zA-Z\\-_]+)(?:\\/.*|)"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1eviYHYU8t0Qp7GytlDtbewzxR2-2iwCRDsqsCB7wZCI/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "options": {}
+      },
+      "id": "411b198e-2759-492a-b1a4-07976c978b96",
+      "name": "Append to Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 3,
+      "position": [
+        1728,
+        544
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "6qsJPMSXSLtqT41D",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "success"
+            },
+            {
+              "name": "message",
+              "value": "Call result processed successfully"
+            },
+            {
+              "name": "contact_id",
+              "value": "={{ $node['Process Call Results'].json.contact_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d9f57a6e-0543-438b-a530-643f8fd62f78",
+      "name": "Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        1936,
+        544
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Process Call Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Contact Status": {
+      "main": [
+        [
+          {
+            "node": "Insert Call Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Call Results": {
+      "main": [
+        [
+          {
+            "node": "Update Contact Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Call Log": {
+      "main": [
+        [
+          {
+            "node": "Append to Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append to Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0cf7f78c-1fea-45ed-8aea-7b723ab6f32f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2dde426c3a8ddb9bde60c89d13d02c8762ffee65170be84edae10a8ddd2a898c"
+  },
+  "id": "tgNaxQlBb0Qx8M1h",
+  "tags": []
+}

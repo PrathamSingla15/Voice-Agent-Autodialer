@@ -1,0 +1,267 @@
+{
+  "name": "Voice Agent Main flow",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "=https://ofrckoqruccqwedymylo.supabase.co/rest/v1/rpc/get_next_contact_single",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {}
+      },
+      "id": "40bb6956-6a2d-423d-b637-57b0ec43ce98",
+      "name": "Fetch Single Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1568,
+        464
+      ],
+      "alwaysOutputData": false,
+      "retryOnFail": false,
+      "waitBetweenTries": 3000,
+      "executeOnce": false,
+      "credentials": {
+        "supabaseApi": {
+          "id": "iSyNqOO059Lycrrk",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if we have a contact to process\nconst response = $input.all()[0].json;\n\n// Handle both array response and single object response\nlet contact;\nif (Array.isArray(response)) {\n  contact = response[0]; // Get first item if array\n} else {\n  contact = response; // Use directly if object\n}\n\n// If no contact or missing required fields, stop execution\nif (!contact || !contact.id || !contact.phone) {\n  throw new Error('No contact available for processing or missing required fields');\n}\n\n// Return the contact for processing\nreturn contact;"
+      },
+      "id": "9cba947e-359c-4f29-9ed7-2fd7c460ad3e",
+      "name": "Validate Single Contact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "c446a6cf-7044-41c7-ba89-e1f3d2d66822",
+      "name": "Every 5 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        464
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": false,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://ofrckoqruccqwedymylo.supabase.co/rest/v1/contacts_to_call",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $node['Validate Single Contact'].json.id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"calling\",\n  \"attempts\": {{ $node['Validate Single Contact'].json.attempts + 1 || 1 }}\n}",
+        "options": {}
+      },
+      "id": "541345bc-0bef-4398-a815-9215c430d8f0",
+      "name": "Update to Calling",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2336,
+        464
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "iSyNqOO059Lycrrk",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://ofrckoqruccqwedymylo.supabase.co/rest/v1/contacts_to_call",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $json.id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "queued"
+            },
+            {
+              "name": "last_attempt_at",
+              "value": "={{ new Date().toISOString() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "10924008-b70c-4826-b8db-858a881abf4f",
+      "name": "Update Status to Queued",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1952,
+        464
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "iSyNqOO059Lycrrk",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://atoms-api.smallest.ai/api/v1/conversation/outbound",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"agentId\": \"68d55989ae02784f846adb2a\",\n  \"phoneNumber\": \"{{ $node['Validate Single Contact'].json.phone }}\",\n  \"variables\": {\n    \"contact_name\": \"{{ $node['Validate Single Contact'].json.name }}\",\n    \"contact_id\": \"{{ $node['Validate Single Contact'].json.id }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "775b33c3-43b5-4dc4-bd42-40068d8b24c6",
+      "name": "Call via Atoms API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2144,
+        464
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ZJNuZdn78N0NijYJ",
+          "name": "Header Auth account 2"
+        },
+        "httpCustomAuth": {
+          "id": "SGkUoWnEDGLwcJLd",
+          "name": "Custom Auth account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Fetch Single Contact": {
+      "main": [
+        [
+          {
+            "node": "Validate Single Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Single Contact": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 5 minutes": {
+      "main": [
+        [
+          {
+            "node": "Fetch Single Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Status to Queued": {
+      "main": [
+        [
+          {
+            "node": "Call via Atoms API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call via Atoms API": {
+      "main": [
+        [
+          {
+            "node": "Update to Calling",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "8399c9b7-49c5-4952-88c1-aaac44429e35",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2dde426c3a8ddb9bde60c89d13d02c8762ffee65170be84edae10a8ddd2a898c"
+  },
+  "id": "htxhiwc6ZeOxSvdg",
+  "tags": []
+}

@@ -1,0 +1,208 @@
+{
+  "name": "Call Metrics Dashboard Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "// Generate API endpoints for metrics\nconst today = new Date().toISOString().split('T')[0];\n\nconst endpoints = [\n  {\n    name: 'total_contacts',\n    method: 'GET',\n    endpoint: '/rest/v1/contacts_to_call?select=id',\n    countOnly: true\n  },\n  {\n    name: 'contacts_by_status',\n    method: 'GET',\n    endpoint: '/rest/v1/contacts_to_call?select=status',\n    groupBy: 'status'\n  },\n  {\n    name: 'calls_dialed_today',\n    method: 'GET',\n    endpoint: `/rest/v1/call_logs?select=id&created_at=gte.${today}`,\n    countOnly: true\n  },\n  {\n    name: 'calls_connected_today',\n    method: 'GET',\n    endpoint: `/rest/v1/call_logs?select=id&created_at=gte.${today}&or=(disposition.eq.completed,disposition.eq.callback,disposition.eq.no_interest)`,\n    countOnly: true\n  },\n  {\n    name: 'call_logs_today',\n    method: 'GET',\n    endpoint: `/rest/v1/call_logs?select=disposition,contact_verified,duration_sec&created_at=gte.${today}`\n  },\n  {\n    name: 'pending_retries',\n    method: 'GET',\n    endpoint: '/rest/v1/contacts_to_call?select=id&or=(status.eq.callback,status.eq.failed)&attempts=lt.3',\n    countOnly: true\n  },\n  {\n    name: 'call_statistics',\n    method: 'POST',\n    endpoint: '/rest/v1/rpc/get_call_statistics',\n    body: {}\n  }\n];\n\nreturn endpoints;"
+      },
+      "id": "61c80b10-7aba-4971-9fa4-a2acf4f2f857",
+      "name": "Prepare API Endpoints",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        80,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.method }}",
+        "url": "=https://ofrckoqruccqwedymylo.supabase.co{{ $json.endpoint }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "={{ $json.countOnly ? 'count=exact' : '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "e888eb50-9e33-415c-810a-83ec4a657d67",
+      "name": "Execute API Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        480,
+        272
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "iSyNqOO059Lycrrk",
+          "name": "Supabase account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "6a31bd0d-79d0-44c1-b36e-066d0c644edf",
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        -128,
+        272
+      ],
+      "notes": "Generate metrics every hour"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "0b1dba09-f463-42ab-9ec0-742496ebcd9e",
+      "name": "Process Each Query",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        272,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all metrics\nconst items = $input.all();\nconst metrics = {};\n\n// Process each API response\nfor (const item of items) {\n  const metricName = item.json.name;\n  const response = item.json;\n  \n  if (response.countOnly && response.headers) {\n    // Extract count from headers\n    const contentRange = response.headers['content-range'] || '';\n    const match = contentRange.match(/\\d+-\\d+\\/(\\d+)/);\n    metrics[metricName] = match ? parseInt(match[1]) : 0;\n  } else if (response.groupBy && response.body) {\n    // Group data by field\n    const grouped = {};\n    response.body.forEach(row => {\n      const key = row[response.groupBy];\n      grouped[key] = (grouped[key] || 0) + 1;\n    });\n    metrics[metricName] = grouped;\n  } else if (response.body) {\n    // Store raw data\n    metrics[metricName] = response.body;\n  }\n}\n\n// Process call logs for today\nconst callLogs = metrics.call_logs_today || [];\nlet successCount = 0;\nlet verifiedCount = 0;\nlet totalDuration = 0;\nlet callsWithDuration = 0;\nconst dispositionCounts = {};\n\ncallLogs.forEach(log => {\n  if (log.disposition === 'completed') successCount++;\n  if (log.contact_verified === 'yes') verifiedCount++;\n  if (log.duration_sec > 0) {\n    totalDuration += log.duration_sec;\n    callsWithDuration++;\n  }\n  dispositionCounts[log.disposition] = (dispositionCounts[log.disposition] || 0) + 1;\n});\n\nconst totalCalls = callLogs.length;\nconst successRate = totalCalls > 0 ? (successCount / totalCalls * 100).toFixed(2) : 0;\nconst verificationRate = totalCalls > 0 ? (verifiedCount / totalCalls * 100).toFixed(2) : 0;\nconst avgDuration = callsWithDuration > 0 ? (totalDuration / callsWithDuration).toFixed(2) : 0;\n\n// Get call statistics from RPC function\nconst stats = metrics.call_statistics?.[0] || {};\n\n// Format for Google Sheets\nconst timestamp = new Date().toISOString();\nconst date = new Date().toLocaleDateString();\nconst time = new Date().toLocaleTimeString();\n\nconst totalContacts = metrics.total_contacts || 0;\nconst callsDialedToday = metrics.calls_dialed_today || 0;\nconst callsConnectedToday = metrics.calls_connected_today || 0;\nconst connectionRate = callsDialedToday > 0 ? ((callsConnectedToday / callsDialedToday) * 100).toFixed(2) : 0;\n\n// Format status breakdown\nconst statusBreakdown = metrics.contacts_by_status || {};\nconst statusSummary = Object.entries(statusBreakdown).map(([status, count]) => `${status}: ${count}`).join(', ');\n\n// Format disposition breakdown\nconst dispositionSummary = Object.entries(dispositionCounts).map(([disp, count]) => `${disp}: ${count}`).join(', ');\n\nreturn [{\n  timestamp,\n  date,\n  time,\n  total_contacts: totalContacts,\n  calls_dialed_today: callsDialedToday,\n  calls_connected_today: callsConnectedToday,\n  connection_rate: `${connectionRate}%`,\n  success_rate: `${successRate}%`,\n  verification_rate: `${verificationRate}%`,\n  avg_duration_seconds: avgDuration,\n  pending_retries: metrics.pending_retries || 0,\n  contact_status_breakdown: statusSummary || 'No data',\n  disposition_breakdown: dispositionSummary || 'No data',\n  db_total_contacts: stats.total_contacts || 0,\n  db_contacts_new: stats.contacts_new || 0,\n  db_contacts_completed: stats.contacts_completed || 0,\n  db_total_calls: stats.total_calls_made || 0\n}];"
+      },
+      "id": "a6a72983-3fdf-4f09-a9bb-b53473218b1a",
+      "name": "Aggregate All Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        672,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1wBNfFGi4pQnOLzx5_JUVu7vyjgdIPxX-hIGHz8buus0",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "8c641fc3-0879-4d43-af7b-33a587e08a40",
+      "name": "Log Metrics to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 3,
+      "position": [
+        896,
+        272
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "6qsJPMSXSLtqT41D",
+          "name": "Google Sheets account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Prepare API Endpoints": {
+      "main": [
+        [
+          {
+            "node": "Process Each Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute API Request": {
+      "main": [
+        [
+          {
+            "node": "Process Each Query",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Aggregate All Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Hour": {
+      "main": [
+        [
+          {
+            "node": "Prepare API Endpoints",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Each Query": {
+      "main": [
+        [
+          {
+            "node": "Execute API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate All Metrics": {
+      "main": [
+        [
+          {
+            "node": "Log Metrics to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "09bb2b33-7c63-4918-8b12-cfd9c2c02d5a",
+  "meta": {
+    "instanceId": "2dde426c3a8ddb9bde60c89d13d02c8762ffee65170be84edae10a8ddd2a898c"
+  },
+  "id": "esdVWv6l962L42Uv",
+  "tags": []
+}
