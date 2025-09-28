@@ -73,7 +73,7 @@ Manages intelligent retry logic:
 
 This file defines the conversation flow for the AI voice agent:
 
-```json
+```jsonc
 {
   "nodes": [
     {
@@ -92,7 +92,7 @@ This file defines the conversation flow for the AI voice agent:
         "action": "Greet and verify contact identity"
       }
     },
-    // Additional conversation nodes...
+     // Additional conversation nodes...
     {
       "id": "10010",
       "type": "post_call_api",
