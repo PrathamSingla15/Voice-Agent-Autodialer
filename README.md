@@ -198,6 +198,3 @@ The Google Sheet for call logging should have the following columns:
 | voicemail | Reached voicemail | Retry later |
 
 ---
-
-
-Built with ❤️ using n8n, Atoms AI, Supabase, and Google Sheets
